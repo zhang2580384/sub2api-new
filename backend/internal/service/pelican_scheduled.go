@@ -53,6 +53,7 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 		qualityBatch: cfg.QualityBatch,
 		testChannel:  cfg.TestChannel,
 		observeOnly:  cfg.Quality != nil && cfg.Quality.Action == QualityActionObserveOnly,
+		monitorProbe: cfg.QuestionKind == ChannelMonitorV3ProbeQuestionKind,
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

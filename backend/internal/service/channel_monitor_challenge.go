@@ -35,13 +35,17 @@ type monitorChallenge struct {
 //
 // 不强求加密随机：math/rand/v2 足够分散，避免 crypto/rand 的开销。
 func generateChallenge() monitorChallenge {
+	return generateChallengeWithTemplate(monitorChallengePromptTemplate)
+}
+
+func generateChallengeWithTemplate(promptTemplate string) monitorChallenge {
 	a := randIntInRange(monitorChallengeMin, monitorChallengeMax)
 	b := randIntInRange(monitorChallengeMin, monitorChallengeMax)
 
 	if rand.IntN(2) == 0 { //nolint:gosec // 仅用于生成测试问题，无安全影响
 		// 加法
 		return monitorChallenge{
-			Prompt:   fmt.Sprintf(monitorChallengePromptTemplate, a, "+", b),
+			Prompt:   fmt.Sprintf(promptTemplate, a, "+", b),
 			Expected: strconv.Itoa(a + b),
 		}
 	}
@@ -52,7 +56,7 @@ func generateChallenge() monitorChallenge {
 		hi, lo = lo, hi
 	}
 	return monitorChallenge{
-		Prompt:   fmt.Sprintf(monitorChallengePromptTemplate, hi, "-", lo),
+		Prompt:   fmt.Sprintf(promptTemplate, hi, "-", lo),
 		Expected: strconv.Itoa(hi - lo),
 	}
 }

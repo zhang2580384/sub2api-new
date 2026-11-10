@@ -16,7 +16,7 @@ import (
 
 // Idle probes keep quiet groups from turning grey on the V3 page. For the
 // groups an admin checks, a slot that is about to end with fewer real successes
-// than the page minimum gets one short request: V1's arithmetic challenge,
+// than the page minimum gets one short arithmetic or numeric-echo request,
 // sent through the same group scheduler a user request reaches (the path V2's
 // candy checks use). Probes are not billed to users, are not written to usage
 // logs and never enter the passive facts; the page reads them separately and
@@ -37,6 +37,9 @@ const (
 	channelMonitorV3ProbeTimeout = 90 * time.Second
 	channelMonitorV3ProbeWorkers = 4
 	channelMonitorV3ProbeMessage = 300
+
+	channelMonitorV3ProbePromptTemplate  = "Only the number.\nQ: %d %s %d = ?\nA:"
+	channelMonitorV3ProbeMaxOutputTokens = 16
 
 	channelMonitorV3WrongAnswerPrefix = "answer_mismatch:"
 )
@@ -361,7 +364,12 @@ func (p *ChannelMonitorV3Prober) runOne(ctx context.Context, target channelMonit
 			logger.LegacyPrintf("service.channel_monitor_v3", "idle probe save group=%d failed: %v", target.GroupID, err)
 		}
 	}()
-	challenge := generateChallenge()
+	challenge := generateChallengeWithTemplate(channelMonitorV3ProbePromptTemplate)
+	if group.Platform == PlatformGrok {
+		// A short echo verifies real generation without asking reasoning models
+		// to solve a problem; upstreams can still ignore the low token budget.
+		challenge.Prompt = "Reply only " + challenge.Expected + "."
+	}
 	runCtx, cancel := context.WithTimeout(ctx, channelMonitorV3ProbeTimeout)
 	defer cancel()
 	plan := &PelicanGroupTestPlan{GroupID: target.GroupID, ModelID: target.Model, PelicanConfig: &PelicanTestConfig{

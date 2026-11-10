@@ -188,6 +188,68 @@ func TestAccountTestService_TestAccountConnection_GrokDefaultsEmptyModelTo45(t *
 	require.Contains(t, recorder.Body.String(), `"model":"grok-4.5"`)
 }
 
+func TestAccountTestService_RunPelicanBackground_GrokPreservesPromptAndProbeBudget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		for _, tc := range []struct {
+			name, kind, effort, wantEffort string
+			maxTokens                      int64
+		}{
+			{"monitor_default", ChannelMonitorV3ProbeQuestionKind, "", "none", 16},
+			{"monitor_high", ChannelMonitorV3ProbeQuestionKind, "high", "none", 16},
+			{"other_test", "candy", "low", "low", 0},
+		} {
+			t.Run(accountType+"/"+tc.name, func(t *testing.T) {
+				account := &Account{
+					ID: 17, Platform: PlatformGrok, Type: accountType,
+					Status: StatusActive, Schedulable: true, Concurrency: 1,
+					Credentials: map[string]any{
+						"api_key": "test-grok-key", "access_token": "test-grok-token",
+						"refresh_token": "test-grok-refresh",
+						"expires_at":    time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339),
+						"model_mapping": map[string]any{"grok": "grok-4.5"},
+					},
+				}
+				repo := &mockAccountRepoForGemini{accountsByID: map[int64]*Account{account.ID: account}}
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body: io.NopCloser(strings.NewReader(
+						"data: {\"type\":\"response.output_text.delta\",\"delta\":\"52\"}\n\n" +
+							"data: {\"type\":\"response.completed\"}\n\n",
+					)),
+				}}
+				svc := &AccountTestService{
+					accountRepo: repo, grokTokenProvider: NewGrokTokenProvider(repo, nil), httpUpstream: upstream,
+				}
+				cfg := &PelicanTestConfig{
+					QuestionKind:    tc.kind,
+					Prompt:          "Reply only 52.",
+					ReasoningEffort: tc.effort,
+				}
+
+				result, err := svc.RunPelicanBackground(context.Background(), account.ID, "grok", cfg)
+
+				require.NoError(t, err)
+				require.NotNil(t, upstream.lastReq, result.ErrorMessage)
+				require.Equal(t, intelligenceTestPrompt(cfg), gjson.GetBytes(upstream.lastBody, "input").String())
+				require.Equal(t, "grok-4.5", gjson.GetBytes(upstream.lastBody, "model").String())
+				require.Equal(t, tc.wantEffort, gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+				require.Equal(t, tc.maxTokens, gjson.GetBytes(upstream.lastBody, "max_output_tokens").Int())
+				require.Equal(t, tc.maxTokens > 0, gjson.GetBytes(upstream.lastBody, "max_output_tokens").Exists())
+				require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+				require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
+				require.Equal(t, "success", result.Status, result.ErrorMessage)
+				outcome, message := channelMonitorV3ProbeVerdict(nil, &PelicanGroupTestResult{
+					Status: result.Status, ResponseText: result.ResponseText, ErrorMessage: result.ErrorMessage,
+				}, "52")
+				require.Equal(t, ChannelMonitorV3ProbeSuccess, outcome, message)
+			})
+		}
+	}
+}
+
 func TestAccountTestService_Grok429PersistsRateLimitReset(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

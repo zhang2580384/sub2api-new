@@ -23,6 +23,7 @@ type pelicanTestOptions struct {
 	reasoningEffort string
 	testChannel     string
 	observeOnly     bool
+	monitorProbe    bool
 }
 
 func withPelicanTestOptions(ctx context.Context, options pelicanTestOptions) context.Context {

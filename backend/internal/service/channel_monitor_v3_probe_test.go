@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,7 +251,8 @@ func TestChannelMonitorV3ProberProbesQuietSlotsOnce(t *testing.T) {
 	require.Len(t, asked, 1)
 	require.Equal(t, ChannelMonitorV3ProbeQuestionKind, asked[0].QuestionKind)
 	require.Equal(t, "low", asked[0].ReasoningEffort)
-	require.Contains(t, asked[0].Prompt, "Calculate and respond with ONLY the number")
+	require.True(t, strings.HasPrefix(asked[0].Prompt, "Only the number.\nQ:"))
+	require.Equal(t, 1, strings.Count(asked[0].Prompt, "Q:"), "idle probes do not send example questions")
 	require.Equal(t, []monitorV3SlotCall{{groups: []int64{4}, from: time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC), to: monitorV3ProbeTick}}, repo.countCalls)
 	require.Equal(t, []int64{77}, router.released)
 
@@ -258,6 +260,27 @@ func TestChannelMonitorV3ProberProbesQuietSlotsOnce(t *testing.T) {
 	p.RunDue(context.Background(), monitorV3ProbeTick)
 	require.Len(t, repo.finished, 1)
 	require.Len(t, asked, 1)
+}
+
+func TestChannelMonitorV3ProberGrokUsesShortNumericReply(t *testing.T) {
+	p, repo, groups := monitorV3ProberFixture(&groupTestRouterFake{steps: []routeStep{{account: account(77, "grok")}}},
+		func(_ context.Context, _ int64, model string, cfg *PelicanTestConfig) (*ScheduledTestResult, error) {
+			require.Equal(t, "grok-4.7-build-fast", model)
+			require.True(t, strings.HasPrefix(cfg.Prompt, "Reply only "))
+			answer := strings.TrimSuffix(strings.TrimPrefix(cfg.Prompt, "Reply only "), ".")
+			value, err := strconv.Atoi(answer)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, value, 0)
+			require.LessOrEqual(t, value, 100)
+			return &ScheduledTestResult{Status: "success", ResponseText: answer}, nil
+		})
+	groups.groups = groupTestGroupsFake{4: {ID: 4, Platform: PlatformGrok, Status: StatusActive}}
+	repo.config.IdleProbe.Groups[0].Model = "grok-4.7-build-fast"
+
+	p.RunDue(context.Background(), monitorV3ProbeTick)
+
+	require.Len(t, repo.finished, 1)
+	require.Equal(t, ChannelMonitorV3ProbeSuccess, repo.finished[0].Outcome, repo.finished[0].ErrorMessage)
 }
 
 func TestChannelMonitorV3ProberGates(t *testing.T) {

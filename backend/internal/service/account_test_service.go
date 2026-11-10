@@ -1552,6 +1552,23 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 	s.prepareGrokTestSSE(c)
 
 	payloadBytes, err := buildGrokQuotaProbeBody(testModelID)
+	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
+		payload := map[string]any{
+			"model": testModelID, "input": promptOrDefault(options.prompt), "stream": true,
+		}
+		effort := options.reasoningEffort
+		if options.monitorProbe {
+			payload["max_output_tokens"] = channelMonitorV3ProbeMaxOutputTokens
+			effort = "none"
+		}
+		if effort != "" {
+			payload["reasoning"] = map[string]any{"effort": effort}
+		}
+		payloadBytes, err = json.Marshal(payload)
+		if err == nil {
+			payloadBytes, err = normalizeGrokResponsesReasoningEffort(payloadBytes, testModelID)
+		}
+	}
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create Grok test payload")
 	}
